@@ -5,6 +5,7 @@ module Arel
     describe 'the mysql visitor' do
       before do
         @visitor = MySQL.new Table.engine.connection
+        @table = Table.new(:users)
       end
 
       def compile node
@@ -33,7 +34,7 @@ module Arel
 
       it "should escape LIMIT" do
         sc = Arel::Nodes::UpdateStatement.new
-        sc.relation = Table.new(:users)
+        sc.relation = @table
         sc.limit = Nodes::Limit.new(Nodes.build_quoted("omg"))
         assert_equal("UPDATE \"users\" LIMIT 'omg'", compile(sc))
       end
@@ -53,6 +54,40 @@ module Arel
         it 'allows a custom string to be used as a lock' do
           node = Nodes::Lock.new(Arel.sql('LOCK IN SHARE MODE'))
           compile(node).must_be_like "LOCK IN SHARE MODE"
+        end
+      end
+
+      describe "Nodes::Regexp" do
+        it "should know how to visit" do
+          node = Arel::Nodes::Regexp.new(@table[:name], Nodes.build_quoted('foo*'))
+          compile(node).must_be_like %{
+            "users"."name" REGEXP BINARY 'foo*'
+          }
+        end
+
+        it 'can handle subqueries' do
+          subquery = @table.project(:id).where(Arel::Nodes::Regexp.new(@table[:name], Nodes.build_quoted('foo*')))
+          node = @table[:id].in subquery
+          compile(node).must_be_like %{
+            "users"."id" IN (SELECT id FROM "users" WHERE "users"."name" REGEXP BINARY 'foo*')
+          }
+        end
+      end
+
+      describe "Nodes::NotRegexp" do
+        it "should know how to visit" do
+          node = Arel::Nodes::NotRegexp.new(@table[:name], Nodes.build_quoted('foo*'))
+          compile(node).must_be_like %{
+            "users"."name" NOT REGEXP BINARY 'foo*'
+          }
+        end
+
+        it 'can handle subqueries' do
+          subquery = @table.project(:id).where(Arel::Nodes::NotRegexp.new(@table[:name], Nodes.build_quoted('foo*')))
+          node = @table[:id].in subquery
+          compile(node).must_be_like %{
+            "users"."id" IN (SELECT id FROM "users" WHERE "users"."name" NOT REGEXP BINARY 'foo*')
+          }
         end
       end
     end
